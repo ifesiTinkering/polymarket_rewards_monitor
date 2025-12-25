@@ -1,6 +1,6 @@
-# Polymarket Rewards Dashboard
+# Polymarket Markets Dashboard
 
-A local web dashboard that monitors and displays all markets with active rewards programs from Polymarket.
+A local web dashboard that monitors and displays all markets from Polymarket with price threshold filtering.
 
 ## Quick Start
 
@@ -10,96 +10,115 @@ A local web dashboard that monitors and displays all markets with active rewards
 
 This will:
 1. Kill any existing process on port 8080
-2. Start the rewards monitor server
+2. Start the markets dashboard server
 3. Open your browser to http://localhost:8080
 
 ## Requirements
 
 - Python 3.9+
-- Playwright (for browser automation)
-
-### Install Dependencies
-
-```bash
-pip3 install playwright
-playwright install chromium
-```
+- No additional dependencies (uses standard library only)
 
 ## Architecture
 
 ### Overview
 
-The system scrapes the Polymarket rewards page using a headless browser, then serves the data through a local HTTP server with an embedded web frontend.
+The system fetches market data from Polymarket's Gamma API and serves it through a local HTTP server with an embedded web frontend.
 
 ```
-+-------------------+     +------------------+     +----------------+
-|   Polymarket      |     |  Rewards Monitor |     |    Browser     |
-|   /rewards page   | --> |  (Python server) | --> |   Dashboard    |
-+-------------------+     +------------------+     +----------------+
-                                |
-                                v
-                          localhost:8080
++-------------------+     +-------------------+     +----------------+
+|   Gamma API       |     |  Markets Dashboard|     |    Browser     |
+|   (Polymarket)    | --> |  (Python server)  | --> |   Dashboard    |
++-------------------+     +-------------------+     +----------------+
+                                 |
+                                 v
+                           localhost:8080
 ```
-
-### Components
-
-**rewards_monitor.py**
-- Playwright-based scraper that navigates through all rewards pages
-- Extracts market data from the DOM (question, prices, spread, images)
-- HTTP server with REST API endpoints
-- Embedded HTML/CSS/JS frontend
-
-**start.sh**
-- Startup script that handles port cleanup and launches the server
 
 ### How It Works
 
-1. **Scraping**: When you click "Refresh", the server launches a headless Chromium browser via Playwright
-2. **Pagination**: It scrapes pages starting from page=1, detecting the end by either:
-   - Finding a partial page (fewer than ~90 markets)
-   - Detecting a loop back to page 1 data
-3. **Data Extraction**: For each market, it extracts from the DOM:
-   - Market question/title
-   - Yes/No prices (in cents)
-   - Max spread
-   - Market image
-   - Link URL
-4. **Serving**: Data is served via JSON API at `/api/markets`
-5. **Frontend**: The embedded HTML page fetches and displays the data in a sortable, filterable table
+1. **Data Fetching**: When you click "Refresh", the server fetches all active events from the Gamma API
+2. **Pagination**: It fetches events in batches of 100 until all are retrieved
+3. **Market Extraction**: For each event, it extracts all nested markets with their prices
+4. **Price Calculation**: Yes/No prices are extracted from `outcomePrices` array and converted to cents
+5. **Serving**: Data is served via JSON API at `/api/markets`
+6. **Frontend**: The embedded HTML page displays data in a sortable, filterable table
 
-### API Endpoints
+### API Used
+
+**Gamma API Endpoint**: `https://gamma-api.polymarket.com/events`
+
+Parameters:
+- `limit`: Number of events per request (max 100)
+- `offset`: Pagination offset
+- `active`: Filter for active events
+- `closed`: Filter for closed status
+
+Response includes events with nested `markets` array containing:
+- `question`: Market question
+- `outcomes`: JSON string of outcome names (e.g., `["Yes", "No"]`)
+- `outcomePrices`: JSON string of prices (e.g., `["0.75", "0.25"]`)
+- `volumeNum`: Total volume
+- `liquidityNum`: Current liquidity
+
+### Local API Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
 | GET / | Serves the HTML dashboard |
-| GET /api/markets | Returns all scraped markets as JSON |
-| GET /api/status | Returns scraping status and progress |
-| GET /api/refresh | Triggers a new scrape |
+| GET /api/markets | Returns all fetched markets as JSON |
+| GET /api/status | Returns fetching status and progress |
+| GET /api/refresh | Triggers a new data fetch |
 
 ### Frontend Features
 
-- **Near close filter**: Toggle to show only markets where Yes or No price is above 90 cents
-- **Sorting**: Click column headers (Yes, No, Spread) to sort ascending/descending
-- **Search**: Filter markets by name
+- **Price threshold filter**: Toggle to show only markets where Yes OR No price is above a threshold (default 90 cents)
+- **Configurable threshold**: Set the minimum price in cents
+- **Sorting**: Click column headers (Yes, No, Volume, Liquidity) to sort
+- **Search**: Filter markets by question or event name
 - **Pagination**: Browse through results 100 at a time
 - **Auto-refresh**: Data refreshes every 60 seconds
 
 ## Files
 
 ```
-rewards_dashboard/
-  rewards_monitor.py    # Main application (scraper + server + frontend)
-  start.sh              # Startup script
-  fetch_rewards_markets.py  # Standalone API fetcher (for reference)
-  README.md             # This file
+polymarket_rewards_monitor/
+  markets_dashboard.py    # Main application (current version)
+  start.sh                # Startup script (current version)
+  v1_rewards_scraper.py   # Version 1: Playwright-based rewards scraper
+  v1_start.sh             # Version 1: Startup script
+  README.md               # This file
 ```
 
-## Why Playwright?
+## Version History
 
-The Polymarket rewards page uses client-side rendering and pagination. The official rewards API has broken pagination (returns duplicate data). Playwright allows us to:
-- Execute JavaScript to render the full page
-- Navigate through paginated results as a real browser would
-- Extract data from the fully rendered DOM
+### Version 2 (Current) - API-based Dashboard
+- Uses Gamma API directly (no browser automation)
+- Shows ALL markets, not just rewards markets
+- Much faster data fetching
+- Price threshold filter for finding markets near resolution
+- No external dependencies beyond Python standard library
+
+### Version 1 - Playwright-based Rewards Scraper
+- Used Playwright to scrape the /rewards page
+- Only showed markets with active rewards programs
+- Required Playwright and Chromium installation
+- Slower due to browser automation
+
+To run Version 1:
+```bash
+./v1_start.sh
+```
+
+## Use Cases
+
+### Finding Markets Near Resolution
+Enable the price threshold filter and set it to 90+ to find markets where either Yes or No is trading above 90 cents - these are markets the crowd believes are likely to resolve soon.
+
+### Market Discovery
+Browse all active markets sorted by volume or liquidity to find popular trading opportunities.
+
+### Research
+Search for specific topics or events to find related prediction markets.
 
 ## Troubleshooting
 
@@ -109,14 +128,12 @@ The start.sh script automatically kills any process on port 8080. If issues pers
 lsof -ti:8080 | xargs kill -9
 ```
 
-**Scraping takes too long**
-Each page takes about 2 seconds to load and scrape. With 30+ pages, a full refresh takes 1-2 minutes.
-
-**Missing data**
-Some fields may show "-" if the DOM structure changes or data is not present for that market.
+**API errors**
+The Gamma API is public and does not require authentication. If you see errors, check your internet connection or try again later.
 
 ## API Reference
 
-For direct API access (separate from this dashboard), see the Polymarket documentation:
+For more information about the Polymarket API:
 - [Polymarket API Docs](https://docs.polymarket.com/)
 - [Gamma Markets API](https://docs.polymarket.com/developers/gamma-markets-api/get-markets)
+- [Events API](https://docs.polymarket.com/api-reference/events/list-events)

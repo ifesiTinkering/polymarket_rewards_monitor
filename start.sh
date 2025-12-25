@@ -1,32 +1,29 @@
 #!/bin/bash
 
-# Polymarket Rewards Dashboard Startup Script
+# Polymarket Markets Dashboard - Start Script
+# Uses the Gamma API to fetch all markets
 
 PORT=8080
 
+echo "Starting Polymarket Markets Dashboard..."
+
 # Kill any existing process on the port
-echo "Checking for existing processes on port $PORT..."
 lsof -ti:$PORT | xargs kill -9 2>/dev/null
 
-# Wait a moment for the port to be released
+# Wait a moment
 sleep 1
 
-# Start the server
-echo "Starting Polymarket Rewards Monitor on http://localhost:$PORT"
-cd "$(dirname "$0")"
-python3 rewards_monitor.py $PORT &
+# Start the server in the background
+python3 "$(dirname "$0")/markets_dashboard.py" $PORT &
 
 # Wait for server to start
 sleep 2
 
-# Open browser to the server URL (not a file)
-echo "Opening browser..."
-/usr/bin/open "http://localhost:$PORT"
+# Open browser
+open "http://localhost:$PORT"
 
-echo ""
-echo "Dashboard is running at http://localhost:$PORT"
-echo "Press Ctrl+C to stop the server"
-echo ""
+echo "Dashboard running at http://localhost:$PORT"
+echo "Press Ctrl+C to stop"
 
 # Wait for the background process
 wait
